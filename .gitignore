@@ -1,0 +1,63 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+eggs/
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Model checkpoints and large data files
+*.pt
+*.pth
+*.pkl
+*.h5
+*.hdf5
+*.npy
+*.npz
+model_checkpoints/
+
+# Logs and outputs
+logs/
+*.log
+*.out
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Rendered notebooks
+rendered_notebooks/
+
+# Large or unnecessary files
+*.csv
+*.xlsx
+*.zip
+*.tar.gz
+
+# Misc
+.env
+.mypy_cache/
