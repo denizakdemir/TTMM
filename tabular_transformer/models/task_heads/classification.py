@@ -7,7 +7,10 @@ This module implements a classification head for the tabular transformer model.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
+import pandas as pd
 from typing import Dict, List, Optional, Tuple, Union, Any
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 
 from tabular_transformer.models.task_heads.base import BaseTaskHead
 
@@ -168,3 +171,113 @@ class ClassificationHead(BaseTaskHead):
         else:
             # Multi-class or binary with two outputs
             return F.softmax(logits, dim=1)
+            
+    def evaluate(
+        self,
+        predictions: Union[Dict[str, torch.Tensor], pd.DataFrame],
+        targets: Union[torch.Tensor, pd.Series, pd.DataFrame],
+        metric: str = "accuracy",
+    ) -> float:
+        """
+        Evaluate model predictions against targets.
+        
+        Args:
+            predictions: Dict of predictions from predict method or DataFrame from predict_dataframe
+            targets: Target values
+            metric: Evaluation metric ('accuracy', 'precision', 'recall', 'f1', 'auc')
+            
+        Returns:
+            Performance score (for metrics like 'accuracy', higher is better,
+            but we negate the value to follow the convention that lower is better)
+        """
+        # Convert targets to numpy array if it's a pandas Series
+        if isinstance(targets, pd.Series):
+            targets_array = targets.values
+        elif isinstance(targets, torch.Tensor):
+            # If it's a tensor, move it to CPU and convert to numpy
+            targets_array = targets.detach().cpu().numpy()
+        else:
+            # Otherwise, convert directly
+            targets_array = np.array(targets)
+        
+        # Get prediction values - handle both dict and DataFrame formats
+        if isinstance(predictions, pd.DataFrame):
+            # Handle DataFrame format from predict_dataframe
+            if 'predicted_class_0' in predictions.columns:
+                # Get the predicted class column 
+                pred_column = 'predicted_class_0'
+                pred_values = predictions[pred_column].values
+            elif any(col.startswith('probability_') for col in predictions.columns):
+                # Binary classification with probabilities, take the highest prob class
+                prob_columns = [col for col in predictions.columns if col.startswith('probability_')]
+                if len(prob_columns) == 1:  # Binary with single column (sigmoid output)
+                    pred_values = (predictions[prob_columns[0]].values > 0.5).astype(int)
+                else:  # Multiple probability columns
+                    pred_values = predictions[prob_columns].values.argmax(axis=1)
+            else:
+                # Fallback to first column
+                pred_values = predictions.iloc[:, 0].values
+        else:
+            # Handle dict format from predict method
+            if "predicted_class" in predictions:
+                pred_values = predictions["predicted_class"]
+            elif "probabilities" in predictions:
+                # Take argmax of probabilities
+                pred_values = predictions["probabilities"].argmax(dim=1)
+            else:
+                # Fallback to logits
+                pred_values = predictions["logits"].argmax(dim=1)
+        
+        # Ensure pred_values is a numpy array
+        if isinstance(pred_values, torch.Tensor):
+            pred_values = pred_values.detach().cpu().numpy()
+        else:
+            # Already a numpy array or similar
+            pred_values = np.array(pred_values)
+            
+        # Make sure arrays are 1D
+        targets_array = targets_array.flatten()
+        pred_values = pred_values.flatten()
+        
+        # Calculate metric
+        if metric == "accuracy" or metric == "default":
+            # Accuracy - fraction of correctly predicted labels (higher is better)
+            score = accuracy_score(targets_array, pred_values)
+            # Negate to follow convention that lower is better
+            return -score
+        elif metric == "precision":
+            # Precision - fraction of true positives among predicted positives
+            score = precision_score(targets_array, pred_values, average='weighted', zero_division=0)
+            return -score
+        elif metric == "recall":
+            # Recall - fraction of true positives identified
+            score = recall_score(targets_array, pred_values, average='weighted', zero_division=0)
+            return -score
+        elif metric == "f1":
+            # F1 score - harmonic mean of precision and recall
+            score = f1_score(targets_array, pred_values, average='weighted', zero_division=0)
+            return -score
+        elif metric == "auc":
+            # AUC-ROC - area under the receiver operating characteristic curve
+            # Only for binary classification
+            if isinstance(predictions, pd.DataFrame):
+                prob_columns = [col for col in predictions.columns if col.startswith('probability_')]
+                if len(prob_columns) == 1:
+                    probs = predictions[prob_columns[0]].values
+                else:
+                    # Take probability of positive class
+                    probs = predictions[prob_columns[1]].values if len(prob_columns) > 1 else None
+            else:
+                # Get probabilities from dict
+                probs = predictions["probabilities"][:, 1].cpu().numpy() if predictions["probabilities"].shape[1] > 1 else predictions["probabilities"].cpu().numpy()
+            
+            if probs is not None:
+                # Only compute AUC if we have proper probability outputs
+                score = roc_auc_score(targets_array, probs)
+                return -score
+            else:
+                # Fall back to accuracy if proper probabilities aren't available
+                score = accuracy_score(targets_array, pred_values)
+                return -score
+        else:
+            raise ValueError(f"Unknown metric for classification: {metric}")

@@ -51,6 +51,8 @@ Dynamic: summary
 
 A PyTorch-based package for applying transformer architectures to tabular data. This package provides a comprehensive implementation of a transformer-based model for tabular data with multiple task heads, variational inference for uncertainty quantification, and support for handling missing values.
 
+> ⚠️ **Important API Note**: This package uses the parameter name `task_head` (singular) consistently in its API, even when passing multiple task heads as a dictionary. Previous versions or documentation may reference `task_heads` (plural), which is no longer supported.
+
 ## Features
 
 - **Handles Mixed Data Types**: Processes both numeric and categorical features in tabular data
@@ -131,7 +133,7 @@ task_heads = {
 }
 
 # 4. Create trainer and train
-trainer = Trainer(encoder=encoder, task_heads=task_heads)
+trainer = Trainer(encoder=encoder, task_head=task_heads)
 trainer.train(
     train_loader=train_dataset.create_dataloader(batch_size=64),
     val_loader=val_dataset.create_dataloader(batch_size=64),
@@ -139,7 +141,7 @@ trainer.train(
 )
 
 # 5. Create predictor and generate predictions
-predictor = Predictor(encoder=encoder, task_heads=task_heads, preprocessor=preprocessor)
+predictor = Predictor(encoder=encoder, task_head=task_heads, preprocessor=preprocessor)
 predictions = predictor.predict_dataframe(df)
 ```
 

@@ -8,6 +8,8 @@ that can be used with the tabular transformer model.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import pandas as pd
+import numpy as np
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Tuple, Union, Any
 
@@ -114,6 +116,26 @@ class BaseTaskHead(nn.Module, ABC, LoggerMixin):
             
         Returns:
             Task-specific predictions
+        """
+        pass
+    
+    @abstractmethod
+    def evaluate(
+        self,
+        predictions: Union[Dict[str, torch.Tensor], pd.DataFrame],
+        targets: Union[torch.Tensor, pd.Series, pd.DataFrame],
+        metric: str = "default",
+    ) -> float:
+        """
+        Evaluate model predictions against targets.
+        
+        Args:
+            predictions: Dict of predictions from predict method or DataFrame from predict_dataframe
+            targets: Target values
+            metric: Evaluation metric (specific to each task type)
+            
+        Returns:
+            Performance score (convention: lower is better for all metrics)
         """
         pass
 

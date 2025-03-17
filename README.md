@@ -107,6 +107,7 @@ The Tabular Transformer package consists of several key components:
 3. **Task Heads**: Specialized heads for different prediction tasks
 4. **Training**: Training loop with multi-task learning support
 5. **Inference**: Prediction utilities and uncertainty quantification
+6. **Explainability**: Tools for model interpretability and explanation
 
 ### Transformer Encoder
 
@@ -125,6 +126,33 @@ Task-specific heads connect to the encoder output:
 - **Competing Risks**: For time-to-event data with multiple competing events
 - **Count**: For count outcomes (Poisson, Negative Binomial, Binomial)
 - **Clustering**: For unsupervised learning
+
+## Explainability
+
+The package includes comprehensive model explainability components:
+
+- **Global Explanations**: Understand overall model behavior
+  - Feature importance calculation using permutation methods
+  - Model-agnostic interpretation techniques
+  
+- **Local Explanations**: Understand individual predictions
+  - LIME (Local Interpretable Model-agnostic Explanations)
+  - Counterfactual explanations to explore "what-if" scenarios
+  
+- **Visualization Tools**: Visual representation of model behavior
+  - Partial Dependence Plots (PDP) to show feature-target relationships
+  - Individual Conditional Expectation (ICE) plots for per-instance analysis
+  - Calibration plots for evaluating prediction accuracy
+  
+- **Sensitivity Analysis**: Measure prediction stability
+  - Quantifies how predictions change with feature variations
+  - Tornado plots for visualizing sensitivity rankings
+
+- **Report Generation**: Create comprehensive explainability reports
+  - HTML dashboards with interactive visualizations
+  - Combined explainability metrics in a single interface
+
+See the [explainability demo](tabular_transformer/examples/explainability_demo.py) for a complete example.
 
 ## Missing Value Handling
 

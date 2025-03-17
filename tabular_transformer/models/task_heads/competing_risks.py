@@ -9,7 +9,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import pandas as pd
 from typing import Dict, List, Optional, Tuple, Union, Any
+from lifelines.utils import concordance_index
 
 from tabular_transformer.models.task_heads.base import BaseTaskHead
 
@@ -280,3 +282,139 @@ class CompetingRisksHead(BaseTaskHead):
             time_horizon = self.num_time_bins
         
         return cumulative_incidence[:, :, time_horizon]
+        
+    def evaluate(
+        self,
+        predictions: Union[Dict[str, torch.Tensor], pd.DataFrame],
+        targets: Union[torch.Tensor, pd.Series, pd.DataFrame],
+        metric: str = "cause_specific_c_index",
+    ) -> float:
+        """
+        Evaluate competing risks model predictions against targets.
+        
+        Args:
+            predictions: Dict of predictions from predict method or DataFrame from predict_dataframe
+            targets: Target values (time and event type)
+            metric: Evaluation metric ('cause_specific_c_index', 'integrated_brier_score')
+            
+        Returns:
+            Performance score (for metrics like 'c_index', higher is better,
+            but we negate the value to follow the convention that lower is better)
+        """
+        # Extract event times and event types from targets
+        if isinstance(targets, pd.DataFrame):
+            # Assume first column is time, second is event type
+            if targets.shape[1] >= 2:
+                time_values = targets.iloc[:, 0].values
+                event_types = targets.iloc[:, 1].values
+            else:
+                # Try to find time and event columns by name
+                if 'time' in targets.columns and 'event' in targets.columns:
+                    time_values = targets['time'].values
+                    event_types = targets['event'].values
+                else:
+                    raise ValueError("Could not identify time and event columns in targets DataFrame")
+        elif isinstance(targets, pd.Series):
+            # Single Series can't contain both time and event type
+            raise ValueError("Targets must contain both time and event type information")
+        elif isinstance(targets, torch.Tensor):
+            # Assume tensor with 2 columns: [time, event]
+            if targets.shape[1] == 2:
+                time_values = targets[:, 0].cpu().numpy()
+                event_types = targets[:, 1].cpu().numpy()
+            else:
+                raise ValueError("Target tensor must have 2 columns: [time, event]")
+        else:
+            # Try to convert to numpy array
+            targets_array = np.array(targets)
+            if targets_array.shape[1] == 2:
+                time_values = targets_array[:, 0]
+                event_types = targets_array[:, 1]
+            else:
+                raise ValueError("Targets must contain both time and event type information")
+        
+        # Extract predicted risk scores from predictions
+        if isinstance(predictions, pd.DataFrame):
+            # For DataFrame output from predict_dataframe
+            
+            # Find the cumulative incidence columns for different risks
+            all_cif_cols = {}
+            for k in range(1, self.num_risks + 1):  # Risks are 1-indexed in event_types
+                risk_cols = [col for col in predictions.columns 
+                            if col.startswith(f'cumulative_incidence_{k-1}_')]
+                if risk_cols:
+                    # Use the last time point's incidence as risk score
+                    max_idx = max([int(col.split('_')[-1]) for col in risk_cols])
+                    all_cif_cols[k] = predictions[f'cumulative_incidence_{k-1}_{max_idx}'].values
+            
+            if not all_cif_cols:
+                # Fallback to first few columns assuming they're risk scores
+                for k in range(1, self.num_risks + 1):
+                    if k <= predictions.shape[1]:
+                        all_cif_cols[k] = predictions.iloc[:, k-1].values
+        else:
+            # For dict output from predict method
+            all_cif_cols = {}
+            if "cumulative_incidence" in predictions:
+                # Extract cumulative incidence at final time point for each risk
+                cif = predictions["cumulative_incidence"][:, :, -1].cpu().numpy()
+                for k in range(1, self.num_risks + 1):  # Risks are 1-indexed
+                    if k-1 < cif.shape[1]:  # Check if this risk exists
+                        all_cif_cols[k] = cif[:, k-1]
+        
+        # Ensure time_values and event_types are numpy arrays
+        time_values = np.array(time_values, dtype=np.float64)
+        event_types = np.array(event_types, dtype=np.int64)
+        
+        # Calculate the requested metric
+        if metric == "cause_specific_c_index" or metric == "default":
+            # Calculate cause-specific concordance index for each risk type
+            all_cindex_scores = []
+            
+            for k in range(1, self.num_risks + 1):  # Risks are 1-indexed
+                if k in all_cif_cols:
+                    # Get risk scores for this risk type
+                    risk_scores = all_cif_cols[k]
+                    
+                    # Create cause-specific event indicator (1 for this risk, 0 otherwise)
+                    cause_indicators = (event_types == k).astype(int)
+                    
+                    # Only calculate if we have events of this type
+                    if np.sum(cause_indicators) > 0:
+                        # Calculate concordance index for this risk
+                        try:
+                            c_index = concordance_index(
+                                time_values, 
+                                risk_scores, 
+                                cause_indicators
+                            )
+                            all_cindex_scores.append(c_index)
+                        except Exception as e:
+                            print(f"Warning: Could not calculate C-index for risk {k}: {e}")
+            
+            # Take mean of all risk-specific C-indices
+            if all_cindex_scores:
+                avg_cindex = np.mean(all_cindex_scores)
+                # Negate score to follow convention that lower is better
+                return -avg_cindex
+            else:
+                # If no valid scores were calculated
+                return 0.0
+        
+        elif metric == "integrated_brier_score":
+            # Integrated Brier Score
+            # Would need to implement a competing risks specific version
+            # Lower values are better
+            # For now, return a placeholder and warning
+            print("Warning: Integrated Brier Score for competing risks not fully implemented, returning placeholder")
+            return 0.5
+        
+        elif metric == "cumulative_incidence_error":
+            # Error in cumulative incidence prediction
+            # Custom metric that could be implemented for competing risks
+            # Lower values are better
+            print("Warning: Cumulative incidence error metric not fully implemented, returning placeholder")
+            return 1.0
+            
+        else:
+            raise ValueError(f"Unknown metric for competing risks analysis: {metric}")

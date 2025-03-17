@@ -27,6 +27,7 @@ tabular_transformer/models/task_heads/classification.py
 tabular_transformer/models/task_heads/clustering.py
 tabular_transformer/models/task_heads/competing_risks.py
 tabular_transformer/models/task_heads/count.py
+tabular_transformer/models/task_heads/multi_task.py
 tabular_transformer/models/task_heads/regression.py
 tabular_transformer/models/task_heads/survival.py
 tabular_transformer/training/__init__.py

@@ -38,13 +38,18 @@ class CategoricalEmbeddings(nn.Module):
         
         self.column_names = list(categorical_dims.keys())
         self.embedding_layers = nn.ModuleDict()
+        self.column_to_safe_name = {}
         
         for col in self.column_names:
             num_categories = categorical_dims[col]
             embed_dim = embedding_dims[col]
             
+            # Create a safe name for the ModuleDict by replacing dots with underscores
+            safe_col_name = col.replace('.', '_')
+            self.column_to_safe_name[col] = safe_col_name
+            
             # Create embedding layer with additional index for missing values
-            self.embedding_layers[col] = nn.Embedding(
+            self.embedding_layers[safe_col_name] = nn.Embedding(
                 num_embeddings=num_categories,
                 embedding_dim=embed_dim,
                 padding_idx=0,  # Use index 0 for padding
@@ -76,8 +81,9 @@ class CategoricalEmbeddings(nn.Module):
             # Get indices for this column
             indices = categorical_features[:, i]
             
-            # Get embeddings
-            embedding = self.embedding_layers[col](indices)
+            # Get embeddings using the safe column name
+            safe_col_name = self.column_to_safe_name[col]
+            embedding = self.embedding_layers[safe_col_name](indices)
             
             # Apply mask if provided
             if mask is not None:

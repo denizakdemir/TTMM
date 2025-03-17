@@ -33,6 +33,13 @@ logs/
 *.log
 *.out
 
+# Explainability artifacts
+*_explanation.png
+*_plot.png
+*_importance.png
+explainability_report.html
+explainability_dashboard/
+
 # Testing
 .coverage
 htmlcov/

@@ -221,6 +221,7 @@ class SensitivityAnalyzer(LoggerMixin):
             "instance": instance,
             "original_prediction": original_value,
             "feature_results": sensitivity_results,
+            "feature_sensitivities": sensitivity_results,  # Add the expected key
         }
     
     def plot_sensitivity(

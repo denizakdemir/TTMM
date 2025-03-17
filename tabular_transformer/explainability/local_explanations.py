@@ -154,6 +154,7 @@ class LIMEExplainer(LocalExplainer):
             "instance": instance,
             "prediction": predictions[task_name],
             "feature_contributions": dict(sorted_contributions),
+            "feature_importance": dict(sorted_contributions),  # Add expected key
             "intercept": 0.5,
             "method": "lime",
         }
@@ -303,10 +304,13 @@ class CounterfactualExplainer(LocalExplainer):
             "task": task_name,
             "original_instance": instance,
             "counterfactual_instance": counterfactual.iloc[0],
+            "counterfactual": counterfactual.iloc[0],  # Add expected key
+            "original": instance,  # Add expected key
             "original_prediction": original_pred[task_name],
             "counterfactual_prediction": counterfactual_pred[task_name],
             "target_outcome": target_outcome,
             "feature_differences": differences,
+            "distances": differences,  # Add expected key
             "method": "counterfactual",
         }
     

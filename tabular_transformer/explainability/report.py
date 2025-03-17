@@ -306,7 +306,7 @@ class Report(LoggerMixin):
             ice_figures[feature] = ice_fig
         
         # Generate calibration plot
-        calibration_result = self.calibration_plot.compute_calibration_curve(
+        calibration_result = self.calibration_plot.compute_calibration(
             data=data,
             task_name=task_name,
             target_column=target_column,

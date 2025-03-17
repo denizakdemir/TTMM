@@ -9,7 +9,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import pandas as pd
 from typing import Dict, List, Optional, Tuple, Union, Any
+from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
 
 from tabular_transformer.models.task_heads.base import BaseTaskHead
 
@@ -292,3 +294,106 @@ class ClusteringHead(BaseTaskHead):
         # Convert to tensor and update cluster centers
         new_centers = torch.stack(centers)
         self.cluster_centers.data = new_centers
+        
+    def evaluate(
+        self,
+        predictions: Union[Dict[str, torch.Tensor], pd.DataFrame],
+        targets: Optional[Union[torch.Tensor, pd.Series, pd.DataFrame]] = None,
+        metric: str = "silhouette",
+    ) -> float:
+        """
+        Evaluate clustering quality.
+        
+        For unsupervised clustering, this evaluates internal metrics of cluster quality,
+        not accuracy against ground truth (which is usually not available).
+        
+        Args:
+            predictions: Dict of predictions from predict method or DataFrame from predict_dataframe
+            targets: Not used for clustering evaluation (kept for API consistency)
+            metric: Evaluation metric ('silhouette', 'davies_bouldin', 'calinski_harabasz')
+            
+        Returns:
+            Performance score (lower is better, so some metrics are negated)
+        """
+        # Get cluster assignments and features
+        if isinstance(predictions, pd.DataFrame):
+            # Handle DataFrame format from predict_dataframe
+            if 'cluster_ids_0' in predictions.columns:
+                labels = predictions['cluster_ids_0'].values
+            else:
+                # Try to find features and compute clusters
+                feature_cols = [col for col in predictions.columns if col.startswith('features_')]
+                if feature_cols:
+                    features = predictions[feature_cols].values
+                    # Convert to tensor for computation
+                    features_tensor = torch.tensor(features, dtype=torch.float32)
+                    labels = self.predict_clusters(features_tensor).cpu().numpy()
+                else:
+                    # Fallback to first column assuming it has cluster IDs
+                    labels = predictions.iloc[:, 0].values
+        else:
+            # Handle dict format from predict method
+            if "cluster_ids" in predictions:
+                labels = predictions["cluster_ids"].cpu().numpy()
+            else:
+                # Compute from features
+                labels = self.predict_clusters(predictions["features"]).cpu().numpy()
+        
+        # Get features for metrics that need them
+        if isinstance(predictions, pd.DataFrame):
+            feature_cols = [col for col in predictions.columns if col.startswith('features_')]
+            if feature_cols:
+                features = predictions[feature_cols].values
+            else:
+                # For metrics that need features but we don't have them, we'll handle later
+                features = None
+        else:
+            features = predictions["features"].cpu().numpy() if "features" in predictions else None
+        
+        # Ensure labels are a numpy array
+        labels = np.array(labels)
+        
+        # Check if we have enough samples and clusters for evaluation
+        unique_labels = np.unique(labels)
+        if len(unique_labels) < 2:
+            # Need at least 2 clusters for evaluation metrics
+            return 0.0
+        
+        # Calculate metric
+        if metric == "silhouette" or metric == "default":
+            # Silhouette score (higher is better, range [-1, 1])
+            # Need features for distance computation
+            if features is not None:
+                score = silhouette_score(features, labels)
+                # Negate to follow convention that lower is better
+                return -score
+            else:
+                # Can't compute silhouette without features
+                return 0.0
+        
+        elif metric == "davies_bouldin":
+            # Davies-Bouldin index (lower is better)
+            # Measures average similarity between clusters
+            if features is not None:
+                return davies_bouldin_score(features, labels)
+            else:
+                return 0.0
+        
+        elif metric == "calinski_harabasz":
+            # Calinski-Harabasz index (higher is better)
+            # Measures ratio of between-cluster to within-cluster variance
+            if features is not None:
+                score = calinski_harabasz_score(features, labels)
+                # Negate to follow convention that lower is better
+                return -score
+            else:
+                return 0.0
+        
+        elif metric == "cluster_stability":
+            # Placeholder for custom cluster stability metric
+            # This could compare cluster assignments across multiple runs or data subsets
+            # Not implemented in this version
+            return 0.0
+        
+        else:
+            raise ValueError(f"Unknown metric for clustering: {metric}")

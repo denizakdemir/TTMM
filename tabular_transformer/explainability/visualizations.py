@@ -200,6 +200,8 @@ class PDPlot(ExplainabilityViz):
             "task": task_name,
             "grid": grid,
             "pd_values": pd_values,
+            "values": pd_values,  # Add expected key
+            "average_prediction": pd_values,  # Add expected key
             "is_categorical": is_categorical,
         }
     
@@ -425,9 +427,13 @@ class ICEPlot(PDPlot):
             "task": task_name,
             "grid": grid,
             "ice_values": ice_values,
+            "ice_curves": ice_values,  # Add expected key
             "pd_values": pd_values,
+            "pd_curve": pd_values,  # Add expected key
+            "values": grid,  # Add expected key
             "sample_indices": sample_indices if n_samples < len(data_df) else np.arange(len(data_df)),
             "original_values": original_values,
+            "instances": sample_indices if n_samples < len(data_df) else np.arange(len(data_df)),  # Add expected key
             "is_categorical": is_categorical,
         }
     
@@ -518,7 +524,7 @@ class CalibrationPlot(ExplainabilityViz):
     against observed outcomes.
     """
     
-    def compute_calibration_curve(
+    def compute_calibration(
         self,
         data: Union[pd.DataFrame, TabularDataset],
         task_name: str,
@@ -577,6 +583,10 @@ class CalibrationPlot(ExplainabilityViz):
         # Create bins and compute calibration curve
         bins = np.linspace(0, 1, n_bins + 1)
         binned_y_pred = np.digitize(y_pred, bins) - 1
+        
+        # Ensure we don't have negative indices (for predictions below the lowest bin boundary)
+        binned_y_pred = np.clip(binned_y_pred, 0, n_bins - 1)
+        
         bin_counts = np.bincount(binned_y_pred, minlength=n_bins)
         
         # Avoid division by zero
@@ -597,8 +607,11 @@ class CalibrationPlot(ExplainabilityViz):
         return {
             "task": task_name,
             "mean_predicted": mean_predicted,
+            "prob_pred": mean_predicted,  # Add expected key
             "fraction_positive": fraction_positive,
+            "prob_true": fraction_positive,  # Add expected key
             "bin_counts": bin_counts,
+            "hist": bin_counts,  # Add expected key
             "n_bins": n_bins,
         }
     

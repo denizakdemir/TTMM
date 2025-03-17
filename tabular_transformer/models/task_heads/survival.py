@@ -9,7 +9,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import pandas as pd
 from typing import Dict, List, Optional, Tuple, Union, Any
+from lifelines.utils import concordance_index
 
 from tabular_transformer.models.task_heads.base import BaseTaskHead
 
@@ -236,3 +238,114 @@ class SurvivalHead(BaseTaskHead):
         else:
             # Without boundaries, just return the bin index as a proxy for time
             return median_bins.float()
+            
+    def evaluate(
+        self,
+        predictions: Union[Dict[str, torch.Tensor], pd.DataFrame],
+        targets: Union[torch.Tensor, pd.Series, pd.DataFrame],
+        metric: str = "c_index",
+    ) -> float:
+        """
+        Evaluate survival model predictions against targets.
+        
+        Args:
+            predictions: Dict of predictions from predict method or DataFrame from predict_dataframe
+            targets: Target values (time and event status)
+            metric: Evaluation metric ('c_index', 'integrated_brier_score')
+            
+        Returns:
+            Performance score (for metrics like 'c_index', higher is better,
+            but we negate the value to follow the convention that lower is better)
+        """
+        # Extract event times and event indicators from targets
+        if isinstance(targets, pd.DataFrame):
+            # Assume first column is time, second is event indicator
+            if targets.shape[1] >= 2:
+                time_values = targets.iloc[:, 0].values
+                event_indicators = targets.iloc[:, 1].values
+            else:
+                # Try to find time and event columns by name
+                if 'time' in targets.columns and 'event' in targets.columns:
+                    time_values = targets['time'].values
+                    event_indicators = targets['event'].values
+                else:
+                    raise ValueError("Could not identify time and event columns in targets DataFrame")
+        elif isinstance(targets, pd.Series):
+            # Single Series can't contain both time and event
+            raise ValueError("Targets must contain both time and event information")
+        elif isinstance(targets, torch.Tensor):
+            # Assume tensor with 2 columns: [time, event]
+            if targets.shape[1] == 2:
+                time_values = targets[:, 0].cpu().numpy()
+                event_indicators = targets[:, 1].cpu().numpy()
+            else:
+                raise ValueError("Target tensor must have 2 columns: [time, event]")
+        else:
+            # Try to convert to numpy array
+            targets_array = np.array(targets)
+            if targets_array.shape[1] == 2:
+                time_values = targets_array[:, 0]
+                event_indicators = targets_array[:, 1]
+            else:
+                raise ValueError("Targets must contain both time and event information")
+        
+        # Extract predicted risk scores from predictions
+        if isinstance(predictions, pd.DataFrame):
+            # For DataFrame output from predict_dataframe
+            
+            # Try to find risk scores or hazard values
+            if any(col.startswith('cumulative_hazard_') for col in predictions.columns):
+                # Use the last time point's cumulative hazard as risk score
+                hazard_cols = [col for col in predictions.columns if col.startswith('cumulative_hazard_')]
+                max_idx = max([int(col.split('_')[-1]) for col in hazard_cols])
+                risk_scores = predictions[f'cumulative_hazard_{max_idx}'].values
+            elif 'median_survival_0' in predictions.columns:
+                # Lower median survival time means higher risk
+                risk_scores = -predictions['median_survival_0'].values
+            else:
+                # Fallback to the first column
+                risk_scores = predictions.iloc[:, 0].values
+        else:
+            # For dict output from predict method
+            if "cumulative_hazard" in predictions:
+                # Use last value of cumulative hazard as risk score
+                risk_scores = predictions["cumulative_hazard"][:, -1].cpu().numpy()
+            elif "hazards" in predictions:
+                # Can use average hazard as risk score
+                risk_scores = predictions["hazards"].mean(dim=1).cpu().numpy()
+            else:
+                # Try to use 1 - survival probability at final time point
+                risk_scores = (1 - predictions["survival_curve"][:, -1]).cpu().numpy()
+        
+        # Ensure all values are numpy arrays
+        time_values = np.array(time_values, dtype=np.float64)
+        event_indicators = np.array(event_indicators, dtype=np.int64)
+        risk_scores = np.array(risk_scores, dtype=np.float64)
+        
+        # Calculate the requested metric
+        if metric == "c_index" or metric == "default":
+            # Concordance index (C-index)
+            # Higher values are better (range: 0-1)
+            # Requires: event times, event indicators, risk scores
+            score = concordance_index(time_values, risk_scores, event_indicators)
+            # Negate score to follow convention that lower is better
+            return -score
+        
+        elif metric == "integrated_brier_score":
+            # Integrated Brier Score
+            # Would need to implement this or use an external package
+            # Lower values are better
+            # For now, return a placeholder and warning
+            print("Warning: Integrated Brier Score not fully implemented, returning placeholder")
+            return 0.5
+        
+        elif metric == "log_likelihood":
+            # Negative log-likelihood
+            # Lower values are better
+            # Compute this by predicting survival probabilities at event times
+            # This would be a custom implementation
+            print("Warning: Log-likelihood score not fully implemented, returning placeholder")
+            return 1.0
+            
+        else:
+            raise ValueError(f"Unknown metric for survival analysis: {metric}")

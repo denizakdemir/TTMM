@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import pandas as pd
 from typing import Dict, List, Optional, Tuple, Union, Any
 
 from tabular_transformer.models.task_heads.base import BaseTaskHead
@@ -350,3 +351,149 @@ class CountHead(BaseTaskHead):
         """
         predictions = self.predict(x)
         return predictions["expected_count"]
+        
+    def evaluate(
+        self,
+        predictions: Union[Dict[str, torch.Tensor], pd.DataFrame],
+        targets: Union[torch.Tensor, pd.Series, pd.DataFrame],
+        metric: str = "mse",
+    ) -> float:
+        """
+        Evaluate count model predictions against targets.
+        
+        Args:
+            predictions: Dict of predictions from predict method or DataFrame from predict_dataframe
+            targets: Target count values
+            metric: Evaluation metric ('mse', 'rmse', 'mae', 'poisson_deviance', etc.)
+            
+        Returns:
+            Performance score (lower is better for all metrics)
+        """
+        # Convert targets to numpy array if it's a pandas Series
+        if isinstance(targets, pd.Series):
+            targets_array = targets.values
+        elif isinstance(targets, torch.Tensor):
+            # If it's a tensor, move it to CPU and convert to numpy
+            targets_array = targets.detach().cpu().numpy()
+        else:
+            # Otherwise, convert directly
+            targets_array = np.array(targets)
+        
+        # Get predicted counts - handle both dict and DataFrame formats
+        if isinstance(predictions, pd.DataFrame):
+            # Handle DataFrame format from predict_dataframe
+            if 'expected_count_0' in predictions.columns:
+                # Get the expected count column 
+                pred_values = predictions['expected_count_0'].values
+            elif any(col.startswith('rate_') for col in predictions.columns):
+                # For Poisson, rate = expected count
+                rate_col = next(col for col in predictions.columns if col.startswith('rate_'))
+                pred_values = predictions[rate_col].values
+            elif any(col.startswith('mean_') for col in predictions.columns):
+                # For negative binomial, mean = expected count
+                mean_col = next(col for col in predictions.columns if col.startswith('mean_'))
+                pred_values = predictions[mean_col].values
+            elif any(col.startswith('probability_') for col in predictions.columns):
+                # For binomial, expected count = n*p
+                prob_col = next(col for col in predictions.columns if col.startswith('probability_'))
+                p_values = predictions[prob_col].values
+                # We need n (max_count) for binomial
+                if hasattr(self, 'max_count'):
+                    n = self.max_count
+                    pred_values = n * p_values
+                else:
+                    # If we don't have max_count, just use the probabilities
+                    pred_values = p_values
+            else:
+                # Fallback to first column
+                pred_values = predictions.iloc[:, 0].values
+        else:
+            # Handle dict format from predict method
+            if "expected_count" in predictions:
+                pred_values = predictions["expected_count"].cpu().numpy().flatten()
+            elif "rate" in predictions:  # Poisson
+                pred_values = predictions["rate"].cpu().numpy().flatten()
+            elif "mean" in predictions:  # Negative binomial
+                pred_values = predictions["mean"].cpu().numpy().flatten()
+            elif "probability" in predictions:  # Binomial
+                p_values = predictions["probability"].cpu().numpy().flatten()
+                n = self.max_count if hasattr(self, 'max_count') else 1
+                pred_values = n * p_values
+            else:
+                # Try to get the first available value
+                first_key = list(predictions.keys())[0]
+                pred_values = predictions[first_key].cpu().numpy().flatten()
+        
+        # Ensure targets and predictions are 1D arrays
+        targets_array = targets_array.flatten()
+        pred_values = np.array(pred_values).flatten()
+        
+        # Make sure arrays have the same length
+        if len(targets_array) != len(pred_values):
+            raise ValueError(f"Target length ({len(targets_array)}) does not match prediction length ({len(pred_values)})")
+        
+        # Calculate the requested metric
+        if metric == "mse" or metric == "default":
+            # Mean Squared Error
+            return np.mean((targets_array - pred_values) ** 2)
+            
+        elif metric == "rmse":
+            # Root Mean Squared Error
+            return np.sqrt(np.mean((targets_array - pred_values) ** 2))
+            
+        elif metric == "mae":
+            # Mean Absolute Error
+            return np.mean(np.abs(targets_array - pred_values))
+            
+        elif metric == "mape":
+            # Mean Absolute Percentage Error
+            # Avoid division by zero by adding a small epsilon to targets
+            # Only calculate for non-zero targets
+            non_zero_mask = targets_array != 0
+            if np.sum(non_zero_mask) == 0:
+                return np.inf  # All targets are zero
+            return np.mean(np.abs((targets_array[non_zero_mask] - pred_values[non_zero_mask]) / 
+                                   (targets_array[non_zero_mask] + 1e-7))) * 100
+            
+        elif metric == "poisson_deviance":
+            # Poisson Deviance
+            # D = 2 * sum(y_true * log(y_true / y_pred) - (y_true - y_pred))
+            # Handle cases where y_true or y_pred is zero
+            non_zero_mask = (targets_array > 0) & (pred_values > 0)
+            
+            if np.sum(non_zero_mask) == 0:
+                # No valid points for deviance calculation
+                return 0.0
+                
+            # Calculate deviance term only for non-zero entries
+            deviance_terms = np.zeros_like(targets_array, dtype=float)
+            
+            # For non-zero entries
+            y_true = targets_array[non_zero_mask]
+            y_pred = pred_values[non_zero_mask]
+            deviance_terms[non_zero_mask] = y_true * np.log(y_true / y_pred) - (y_true - y_pred)
+            
+            # For y_true = 0, the term simplifies to y_pred
+            zero_true_mask = targets_array == 0
+            deviance_terms[zero_true_mask] = pred_values[zero_true_mask]
+            
+            # Sum and multiply by 2
+            return 2 * np.sum(deviance_terms) / len(targets_array)
+            
+        elif metric == "r2":
+            # R-squared (coefficient of determination)
+            # 1 - (sum of squared residuals / total sum of squares)
+            # Note: Higher values are better for R2, but we negate it to follow
+            # the convention that lower is better
+            if np.var(targets_array) == 0:
+                # If all targets are the same, R2 is undefined
+                return np.inf
+                
+            ss_res = np.sum((targets_array - pred_values) ** 2)
+            ss_tot = np.sum((targets_array - np.mean(targets_array)) ** 2)
+            r2 = 1 - (ss_res / ss_tot)
+            # Negate to follow convention that lower is better
+            return -r2
+            
+        else:
+            raise ValueError(f"Unknown metric for count regression: {metric}")
