@@ -10,6 +10,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 from typing import Dict, List, Optional, Tuple, Union, Any
+from sklearn.preprocessing import LabelEncoder
 
 from tabular_transformer.data.preprocess import FeaturePreprocessor
 from tabular_transformer.utils.logger import LoggerMixin
@@ -70,13 +71,26 @@ class TabularDataset(Dataset, LoggerMixin):
         # Process targets
         self.targets = {}
         self.target_missing_masks = {}
+        self.target_encoders = {}
         
         for task_name, cols in self.target_columns.items():
             if cols:
                 target_df = self.data[cols]
                 self.target_missing_masks[task_name] = target_df.isna().values.astype(np.float32)
-                # Fill missing with zeros for now, they'll be ignored in loss computation
-                self.targets[task_name] = target_df.fillna(0).values.astype(np.float32)
+                
+                # Check if the target values are strings and need encoding
+                # This is particularly important for classification tasks with string labels
+                if target_df.dtypes.iloc[0] == 'object':
+                    self.logger.info(f"Detected string values in target column '{cols[0]}', auto-encoding to numeric")
+                    encoder = LabelEncoder()
+                    # Fill missing with placeholder string for encoding
+                    encoded_series = encoder.fit_transform(target_df.fillna('__missing__').iloc[:, 0])
+                    # Store the encoder for potential inverse transform later
+                    self.target_encoders[task_name] = encoder
+                    self.targets[task_name] = encoded_series.reshape(-1, 1).astype(np.float32)
+                else:
+                    # Fill missing with zeros for now, they'll be ignored in loss computation
+                    self.targets[task_name] = target_df.fillna(0).values.astype(np.float32)
         
         self.logger.info(
             f"Created dataset with {len(self.data)} samples, "

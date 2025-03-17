@@ -12,6 +12,7 @@ from tabular_transformer.models.task_heads.survival import SurvivalHead
 from tabular_transformer.models.task_heads.competing_risks import CompetingRisksHead
 from tabular_transformer.models.task_heads.count import CountHead
 from tabular_transformer.models.task_heads.clustering import ClusteringHead
+from tabular_transformer.models.task_heads.multi_task import MultiTaskHead
 
 __all__ = [
     'BaseTaskHead',
@@ -21,4 +22,5 @@ __all__ = [
     'CompetingRisksHead',
     'CountHead',
     'ClusteringHead',
+    'MultiTaskHead',
 ]
